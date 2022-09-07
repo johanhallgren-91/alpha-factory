@@ -67,7 +67,7 @@ class FeatureResearch(PurgedKFold):
     def __post_init__(self):
         self.X = self.research_frame.features
         self.y = self.research_frame.labels
-        self.sample_weight = self.research_frame.sample_weights
+        self.sample_weight = self.research_frame.sample_weights.values
         
     def purged_cv_score(self, feature_columns: List[str]) -> Dict[str, float]:
         """ Purges the train set and crossvalidates a classifier. """            
@@ -96,7 +96,7 @@ class FeatureResearch(PurgedKFold):
         return self.X
     
     def feature_importance_mdi(self):
-        fit = self.clf.fit(**self.research_frame.classifier_args)
+        fit = self.clf.fit(X = self.X, y = self.y, sample_weights = self.sample_weight)
         self.mdi = {
             'feature_importance': get_feature_importance(fit, self.research_frame.feature_columns),
             'out_of_bag_score': fit.oob_score_, 
