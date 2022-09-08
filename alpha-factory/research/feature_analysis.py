@@ -98,9 +98,9 @@ class FeatureResearch(PurgedKFold):
     def feature_importance_mdi(self):
         fit = self.clf.fit(X = self.X, y = self.y, sample_weights = self.sample_weight)
         self.mdi = {
-            'feature_importance': get_feature_importance(fit, self.research_frame.feature_columns),
+            'feature_importance': get_feature_importance(fit, self.X.columns),
             'out_of_bag_score': fit.oob_score_, 
-            'out_of_sample_score': self.purged_cv_score(self.research_frame.feature_columns)
+            'out_of_sample_score': self.purged_cv_score(self.X.columns)
         }
         return self.mdi
        
@@ -110,7 +110,7 @@ class FeatureResearch(PurgedKFold):
         It computes the OOS performance score of each feature in isolation.
         """
         self.sfi =  pd.DataFrame({
-            col: self.purged_cv_score([col]) for col in self.research_frame.feature_columns}
+            col: self.purged_cv_score([col]) for col in self.X.columns}
         ).T
         return self.sfi
     
