@@ -99,7 +99,8 @@ class ResearchFrame(ABC):
         if self.data.index.dtype != features.index.dtype:
             raise TypeError('Missmatch in index data types')
         
-        features = features[features.isnull().mean().loc[lambda x: x < drop_col_tresh].index]
+        if isinstance(features, pd.DataFrame):
+            features = features[features.isnull().mean().loc[lambda x: x < drop_col_tresh].index]
         self.feature_columns = features.columns
         self.data = self.data.join(features)
         if dropna: 

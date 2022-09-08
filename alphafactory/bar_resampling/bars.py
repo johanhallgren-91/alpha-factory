@@ -1,4 +1,4 @@
-from . import util
+from . import utils
 from typing import List, Union
 from numba import njit
 import pandas as pd
@@ -41,14 +41,14 @@ def calculate_dollar_or_volume_bars(
     
     # Adds features that can be vectorized
     timebars['dollar_value'] = timebars[['open', 'high', 'low', 'close']].mean(axis = 1) * timebars['volume']
-    timebars['buy_volume'] = util.estimated_buy_volume(timebars['open'], timebars['close'], timebars['volume']).fillna(0)
+    timebars['buy_volume'] = utils.estimated_buy_volume(timebars['open'], timebars['close'], timebars['volume']).fillna(0)
     
     #if 'bar_threshold' not in timebars.columns:
     threshold = (
         timebars[sample_series]
-            .pipe(util.rolling_daily_average, rolling_per)
+            .pipe(utils.rolling_daily_average, rolling_per)
             .div(nr_bars_per_day)
-            .pipe(util.round_to_nearest_exponent)
+            .pipe(utils.round_to_nearest_exponent)
             .rename('bar_threshold')
     )
     timebars = timebars.join(threshold, on = timebars.index.date)
