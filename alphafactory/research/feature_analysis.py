@@ -1,5 +1,5 @@
-from research.utils import get_feature_importance, plot_feature_importances, score_clf, fit_and_score
-from research.research_frame import ResearchFrame
+from .utils import get_feature_importance, plot_feature_importances, score_clf, fit_and_score
+from .research_frame import ResearchFrame
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.base import BaseEstimator

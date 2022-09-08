@@ -1,5 +1,5 @@
 from __future__ import annotations
-from research.utils import (
+from .utils import (
     get_daily_volatility, calculate_return, find_forward_dates, ols_reg,
     volatility_based_cumsum_filter, apply_time_decay, return_ser)
 from typing import Optional, Dict, List, Union

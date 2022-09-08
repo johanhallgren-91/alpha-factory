@@ -1,4 +1,4 @@
-from bar_resampling import util
+from . import util
 from typing import List, Union
 from numba import njit
 import pandas as pd
@@ -7,7 +7,7 @@ import numpy as np
 
 def calculate_dollar_or_volume_bars(
         timebars: pd.DataFrame, 
-        rolling_per: int = Union[None, int], 
+        rolling_per: Union[None, int] = None, 
         nr_bars_per_day: int = 50,
         dollarbar: bool = True, 
         start_idx: int = 0
@@ -34,7 +34,7 @@ def calculate_dollar_or_volume_bars(
     bars: pd.DataFrame
         A data frame with dollar bars. 
     """
-    
+    timebars.columns = timebars.columns.str.lower()
     timebars.sort_index(inplace = True)
     if rolling_per is None: rolling_per = len(set(timebars.index.date))
     sample_series = 'dollar_value' if dollarbar else 'volume'

@@ -1,4 +1,4 @@
-from research.research_frame import FixedTimeFrame, ColNames
+from alphafactory.research.research_frame import FixedTimeFrame, ColNames
 import pandas as pd
 import pytest
 
