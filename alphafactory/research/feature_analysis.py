@@ -1,4 +1,4 @@
-from .utils import get_feature_importance, plot_feature_importances, score_clf, fit_and_score
+from .utils import get_feature_importance, score_clf, fit_and_score, is_stationary
 from .research_frame import ResearchFrame
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
@@ -10,7 +10,7 @@ from functools import partial
 import pandas as pd
 import numpy as np
 from scipy import stats
-
+import itertools
 
 @dataclass
 class PurgedKFold:
@@ -109,9 +109,10 @@ class FeatureResearch(PurgedKFold):
         Single feature importance (SFI) is a cross-section predictive-importance (out-of-sample) method.
         It computes the OOS performance score of each feature in isolation.
         """
-        self.sfi =  pd.DataFrame({
-            col: self.purged_cv_score([col]) for col in self.X.columns}
-        ).T
+        self.sfi =  pd.DataFrame.from_dict({
+            col: self.purged_cv_score([col]) for col in self.X.columns}, 
+            orient = 'index'
+        )
         return self.sfi
     
 
@@ -167,15 +168,25 @@ class FeatureResearch(PurgedKFold):
             'out_of_sample_score': score.mean()
         }
         return self.mda
+
+    def spearman_corr(self, longitudinal = True, freq = None) -> pd.DataFrame:
+        def corr_dict(df, return_col, feature_col, group) -> Dict[str, any]:
+            corr, pval =  stats.spearmanr(df[return_col], df[feature_col])
+            return {'group': group, 'feature': feature_col, 'corr': corr, 'p-value': pval}
         
-    def spearman_corr(self) -> pd.DataFrame:
-        def corr_dict(df, ret, feature, asset):
-            corr, pval =  stats.spearmanr(df[ret], df[feature])
-            return {'asset': asset, 'feature': feature, 'corr': corr, 'p-value': pval}
-        
-        self.spearman_corr = pd.DataFrame([
-            corr_dict(df, self.research_frame.forward_returns.name, col, asset) 
-                for asset, df in self.research_frame.data.groupby(self.research_frame.assets) 
-                for col in self.research_frame.features.columns
+        grouping = (self.research_frame.longitudinal_grouping() if longitudinal 
+               else self.research_frame.cross_sectional_grouping(freq = freq)
+        )
+        groups = itertools.product(grouping, self.X.columns)
+        spearman_corr = pd.DataFrame([
+            corr_dict(df, self.research_frame.forward_returns.name, feature, group) 
+            for (group, df), feature in groups
         ])
-        return self.spearman_corr
+        return spearman_corr
+       
+    def check_stationarity(self): 
+        return pd.Series(
+            {col: is_stationary(self.X[col]) for col in self.X.columns}, 
+            name = 'is_stationary'
+        )
+        

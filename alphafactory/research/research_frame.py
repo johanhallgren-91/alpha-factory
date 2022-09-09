@@ -2,10 +2,10 @@ from __future__ import annotations
 from .utils import (
     get_daily_volatility, calculate_return, find_forward_dates, ols_reg,
     volatility_based_cumsum_filter, apply_time_decay, return_ser)
-from typing import Optional, Dict, List, Union
+from typing import Optional, Dict, List, Union, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+import datetime as dt 
 import pandas as pd
 import numpy as np
 
@@ -73,15 +73,16 @@ class ResearchFrame(ABC):
         co_events = self._numb_concurrent_events()
         log_returns = self.forward_returns.add(1).apply(np.log)
         
-        return_weights = pd.Series(index=self.data.index, dtype='float')
-        for start_date, end_date in self.end_dates.iteritems():
-            return_weights.loc[start_date] = (log_returns.loc[start_date:end_date] / co_events.loc[start_date:end_date]).sum()
-        return_weights = return_weights.abs() * len(return_weights) / return_weights.abs().sum()
+        weights = pd.Series({
+            start_date: (log_returns.loc[start_date:end_date] / co_events.loc[start_date:end_date]).sum() 
+            for start_date, end_date in self.end_dates.iteritems()
+        })
+        weights = weights.abs() * len(weights) / weights.abs().sum()
        
         if time_decay < 1:
-            return_weights *= apply_time_decay(return_weights, last_weight = time_decay)
+            weights *= apply_time_decay(weights, last_weight = time_decay)
      
-        self.data[ColNames.SAMPLE_WEIGHT] = return_weights
+        self.data[ColNames.SAMPLE_WEIGHT] = weights
         return self
 
     def _numb_concurrent_events(self) -> pd.Series:
@@ -101,8 +102,9 @@ class ResearchFrame(ABC):
         
         if isinstance(features, pd.DataFrame):
             features = features[features.isnull().mean().loc[lambda x: x < drop_col_tresh].index]
+       
+        self.data = self.data.merge(features, how = 'left', left_index = True, right_index = True, validate = 'one_to_one')
         self.feature_columns = features.columns
-        self.data = self.data.join(features)
         if dropna: 
             self.data.dropna(inplace = True)
         return self
@@ -111,6 +113,13 @@ class ResearchFrame(ABC):
         self.data[ColNames.LABEL] = np.sign(self.forward_returns)
         return self
       
+    def cross_sectional_grouping(self, freq: str = None) -> Tuple[dt.datetime, pd.DataFrame]:
+        group = self.data.index if freq is None else pd.Grouper(freq = freq, origin = 'start')
+        return self.data.groupby(group)
+
+    def longitudinal_grouping(self) -> Tuple[str, pd.DataFrame]:
+        return self.data.groupby(self.assets)
+
     @property
     def forward_returns(self) ->  Union[pd.Series, None]:
         return return_ser(self.data, ColNames.RETURN)
@@ -221,7 +230,7 @@ class TrippleBarrierFrame(FixedTimeFrame):
        
     def _add_horizontal_barriers(self) -> TrippleBarrierFrame:       
         """Finds first time between start date and end date that the stop loss and profit taking target is hit."""
-        def _find_horizontal_barrier_dates(prices:pd.Series, start_date:datetime, end_date:datetime, target:float) -> Dict[str, float]:
+        def _find_horizontal_barrier_dates(prices:pd.Series, start_date:dt.datetime, end_date:dt.datetime, target:float) -> Dict[str, float]:
             """"Used in _add_horizontal_barriers. """
             price_path = prices[start_date:end_date] 
             returns = calculate_return(price_path, price_path[start_date])
@@ -303,6 +312,7 @@ class TrendScaningFrame(ResearchFrame):
 @dataclass
 class MultiAssetFrame(ResearchFrame):
     """ Creates a combined frame for multiple assets """
+    
     research_frames: List[ResearchFrame]
     
     def __post_init__(self):

@@ -1,6 +1,7 @@
 from sklearn.metrics import log_loss, accuracy_score
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import BaggingClassifier
+from statsmodels.tsa.stattools import adfuller
 from sklearn.base import BaseEstimator
 import matplotlib.pyplot as plt
 from typing import Optional, Union
@@ -219,3 +220,7 @@ def set_up_bagging_classifier(
 def ols_reg(arr: np.array) -> float:
     x = sm.add_constant(np.arange(arr.shape[0]))
     return sm.OLS(arr, x).fit()
+
+
+def is_stationary(ser: pd.Series, cutoff: float = .05) -> bool:
+    return adfuller(ser)[1] < cutoff
