@@ -1,4 +1,4 @@
-from alphafactory.research.research_frame import FixedTimeFrame, ColNames
+from alphafactory.research.research_frame import FixedTimeFrameGenerator, ColNames
 import pandas as pd
 import pytest
 
@@ -18,15 +18,16 @@ def test_fixed_time_frame_default(prices) -> None:
             ColNames.ASSETS: ['test'] * (len(prices)-1)
         }    
     )
-    ftr = FixedTimeFrame(prices, 'test', pd.Timedelta(days = 1))
-    assert (ftr.data==expected_df).all().all()
+    ftr = FixedTimeFrameGenerator(prices, 'test', pd.Timedelta(days = 1)).create_frame()
+    assert (ftr.data.drop('sample_weight',axis=1)==expected_df).all().all()
 
 def test_numb_concurrent_events(prices) -> None:
     expected_ser = pd.Series(
         index = prices.index[:-1],
         data = [1] + [2] * (len(prices)-2)
     )
-    ftr = FixedTimeFrame(prices, 'test', pd.Timedelta(days = 1))
+    ftr = FixedTimeFrameGenerator(prices, 'test', pd.Timedelta(days = 1))
+    ftr.create_frame()
     numb_concurrent_events = ftr._numb_concurrent_events()
     assert (numb_concurrent_events==expected_ser).all()
     

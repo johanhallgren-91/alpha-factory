@@ -1,13 +1,15 @@
 from __future__ import annotations
 from .utils import (
     get_daily_volatility, calculate_return, find_forward_dates, ols_reg,
-    volatility_based_cumsum_filter, apply_time_decay, return_ser)
+    volatility_based_cumsum_filter, apply_time_decay, return_ser
+)
 from typing import Optional, Dict, List, Union, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import datetime as dt 
 import pandas as pd
 import numpy as np
+import itertools
 
 class ColNames:
     START_DT = 'date'
@@ -22,103 +24,31 @@ class ColNames:
     TRIGGER = 'trigger'
     TVAL = 'tval'
     ASSETS = 'asset'
-   
-     
-class ResearchFrame(ABC):
-    """ An interface for calculating forward returns with diffrent strategies. """
-       
-    @abstractmethod
-    def _find_end_dates(self) -> ResearchFrame:
-        """Finds when each trade is ended."""
-        pass
+  
     
-    def __post_init__(self) -> None:
-        self.data = pd.DataFrame()
-        self.prices.sort_index(inplace = True)
-        
-        self \
-            ._find_end_dates() \
-            ._calculate_forward_return() \
-            ._add_labels()
-            
-        self.data[ColNames.ASSETS] = self.asset_name
-        
-    def setup_frame(
-            self, features: pd.DataFrame, time_decay: float = .75, 
-            dropna: bool = True, drop_col_tresh: float = .95
-        ) -> ResearchFrame:
-        """"
-        The steps for setting up the frame. If no features are supplied it just calculates forward returns.
-        Note that features should be resampled with the same frequenzy as prices and have NaNs filled in. 
-        """
-        self \
-            ._add_features(features, dropna = dropna, drop_col_tresh = drop_col_tresh) \
-            ._add_sample_weights(time_decay) 
-        return self
-        
-    def _calculate_forward_return(self) -> ResearchFrame:
-        """Calculate the return based on the end date."""
-        self.data[ColNames.RETURN] = calculate_return(
-            start_price = self.prices.loc[self.data.index],
-            end_price= self.prices.loc[self.end_dates.values].values
-        ) 
-        return self
+@dataclass
+class ResearchFrame:
     
-    def _add_sample_weights(self, time_decay: Optional[float] = 1.) -> ResearchFrame:
-        """
-        Highly overlapping outcomes would have disproportionate weights if considered equal to non-overlapping outcomes.
-        At the same time, labels associated with large absolute returns should be given more importance than labels with negligible absolute returns.
-        This function calculates weights by uniqueness and absolute return.
-        """
-        co_events = self._numb_concurrent_events()
-        log_returns = self.forward_returns.add(1).apply(np.log)
+    """ """
+    
+    data: pd.DataFrame
+    feature_columns: List[str] = None
+    
+    def __post_init__(self):
+        if self.feature_columns is None: self.feature_columns = [] 
         
-        weights = pd.Series({
-            start_date: (log_returns.loc[start_date:end_date] / co_events.loc[start_date:end_date]).sum() 
-            for start_date, end_date in self.end_dates.iteritems()
-        })
-        weights = weights.abs() * len(weights) / weights.abs().sum()
-       
-        if time_decay < 1:
-            weights *= apply_time_decay(weights, last_weight = time_decay)
-     
-        self.data[ColNames.SAMPLE_WEIGHT] = weights
-        return self
+    def cross_sectional_grouping(self, freq: str = None) -> Tuple[dt.datetime, pd.Series, pd.Series]:
+        """G roups the data by time period and feature across all assets for cross sectional study. """
+        period_group = self.data.index if freq is None else pd.Grouper(freq = freq, origin = 'start')
+        group = itertools.product(self.feature_columns, self.data.groupby(period_group))
+        for feature, (period, df) in group:
+            yield period, df[feature], df[ColNames.RETURN]
 
-    def _numb_concurrent_events(self) -> pd.Series:
-        """Calculates how many trades are part of each return contribution."""   
-        co_events = pd.Series(0, index = self.data.index, name = 'num_co_events')
-        for start_date, end_date in self.end_dates.iteritems():
-            co_events.loc[start_date:end_date] +=1
-        return co_events
-        
-    def _add_features(self, features: pd.DataFrame, dropna: bool = True, drop_col_tresh = .95) -> ResearchFrame:
-        """
-        Adds features to the returns. 
-        Note that features should be resampled with the same frequenzy as prices and have NaNs filled in. 
-        """
-        if self.data.index.dtype != features.index.dtype:
-            raise TypeError('Missmatch in index data types')
-        
-        if isinstance(features, pd.DataFrame):
-            features = features[features.isnull().mean().loc[lambda x: x < drop_col_tresh].index]
-       
-        self.data = self.data.merge(features, how = 'left', left_index = True, right_index = True, validate = 'one_to_one')
-        self.feature_columns = features.columns
-        if dropna: 
-            self.data.dropna(inplace = True)
-        return self
-    
-    def _add_labels(self) -> ResearchFrame:
-        self.data[ColNames.LABEL] = np.sign(self.forward_returns)
-        return self
-      
-    def cross_sectional_grouping(self, freq: str = None) -> Tuple[dt.datetime, pd.DataFrame]:
-        group = self.data.index if freq is None else pd.Grouper(freq = freq, origin = 'start')
-        return self.data.groupby(group)
-
-    def longitudinal_grouping(self) -> Tuple[str, pd.DataFrame]:
-        return self.data.groupby(self.assets)
+    def longitudinal_grouping(self) -> Tuple[str, pd.Series, pd.Series]:
+        """ Groups the data by asset and feature across time for longitudinal study. """
+        group = itertools.product(self.feature_columns, self.data.groupby(self.assets))
+        for feature, (asset, df) in group:
+            yield asset, df[feature], df[ColNames.RETURN]
 
     @property
     def forward_returns(self) ->  Union[pd.Series, None]:
@@ -138,23 +68,133 @@ class ResearchFrame(ABC):
     
     @property
     def features(self) -> Union[pd.Series, None]:
-        if hasattr(self, 'feature_columns'):
+        if self.feature_columns:
             return self.data[self.feature_columns]
-        return None
     
     @property
     def assets(self) -> Union[pd.Series, None]:
         return return_ser(self.data, ColNames.ASSETS)
     
-    def __len__(self):
+    @property
+    def nr_assets(self) -> int:
         return self.assets.nunique()
     
-    def __repr__(self) -> str:
-        return self.asset_name
- 
+    @property
+    def shape(self):
+        return self.data.shape
     
+    def __repr___(self):
+        return self.head().to_markdown()
+    
+    def __add__(self, research_frame) -> ResearchFrame:
+        return ResearchFrame(
+            data = pd.concat([self.data, research_frame.data]).drop_duplicates(),
+            feature_columns = sorted(set(self.feature_columns + research_frame.feature_columns))
+        )   
+    
+class ResearchFrameGenerator(ABC):
+    
+    """ An interface for calculating forward returns with diffrent strategies. """
+    
+    @abstractmethod
+    def _find_end_dates(self) -> ResearchFrameGenerator:
+        """Finds when each trade is ended."""
+        pass  
+    
+    def __post_init__(self) -> None:
+        self.data = pd.DataFrame()
+        self.prices.sort_index(inplace = True)
+    
+    def create_frame(
+                self, 
+                features: Union[pd.DataFrame, None] = None, 
+                time_decay: float = .75, 
+                dropna: bool = True, 
+                drop_col_tresh: float = .95
+    ) -> ResearchFrame:
+            """"
+            The steps for setting up the frame. If no features are supplied it just calculates forward returns.
+            Note that features should be resampled with the same frequenzy as prices and have NaNs filled in. 
+            """
+            columns = []
+            
+            self \
+                ._find_end_dates() \
+                ._calculate_forward_return() \
+                ._add_labels() \
+                ._add_asset_col() 
+            
+            if features is not None:
+                if isinstance(features, pd.Series): features = features.to_frame()
+                self._add_features(features, dropna = dropna, drop_col_tresh = drop_col_tresh) 
+                columns = self.data.columns.intersection(features.columns)           
+            self._add_sample_weights(time_decay) 
+              
+            return ResearchFrame(self.data, columns)
+             
+    def _calculate_forward_return(self) -> ResearchFrameGenerator:
+        """Calculate the return based on the end date."""
+        self.data[ColNames.RETURN] = calculate_return(
+            start_price = self.prices.loc[self.data.index],
+            end_price = self.prices.loc[self.data[ColNames.END_DT].values].values
+        ) 
+        return self
+    
+    def _add_labels(self) -> ResearchFrameGenerator:
+        self.data[ColNames.LABEL] = np.sign(self.data[ColNames.RETURN])
+        return self
+    
+    def _add_asset_col(self) -> ResearchFrameGenerator:
+        self.data[ColNames.ASSETS] = self.asset_name
+        return self
+            
+    def _add_features(self, features: pd.DataFrame, dropna: bool = True, drop_col_tresh = .95) -> ResearchFrameGenerator:
+        """
+        Adds features to the returns. 
+        Note that features should be resampled with the same frequenzy as prices and have NaNs filled in. 
+        """
+        if self.data.index.dtype != features.index.dtype:
+            raise TypeError('Missmatch in index data types')
+        
+        if isinstance(features, pd.DataFrame):
+            features = features[features.isnull().mean().loc[lambda x: x < drop_col_tresh].index]
+       
+        self.data = self.data.merge(features, how = 'left', left_index = True, right_index = True, validate = 'one_to_one')
+        if dropna: 
+            self.data.dropna(inplace = True)
+        return self
+    
+    def _add_sample_weights(self, time_decay: Optional[float] = 1.) -> ResearchFrameGenerator:
+        """
+        Highly overlapping outcomes would have disproportionate weights if considered equal to non-overlapping outcomes.
+        At the same time, labels associated with large absolute returns should be given more importance than labels with negligible absolute returns.
+        This function calculates weights by uniqueness and absolute return.
+        """
+        co_events = self._numb_concurrent_events()
+        log_returns = self.data[ColNames.RETURN].add(1).apply(np.log)
+        
+        weights = pd.Series({
+            start_date: (log_returns.loc[start_date:end_date] / co_events.loc[start_date:end_date]).sum() 
+            for start_date, end_date in self.data[ColNames.END_DT].iteritems()
+        })
+        weights = weights.abs() * len(weights) / weights.abs().sum()
+       
+        if time_decay < 1:
+            weights *= apply_time_decay(weights, last_weight = time_decay)
+     
+        self.data[ColNames.SAMPLE_WEIGHT] = weights
+        return self
+
+    def _numb_concurrent_events(self) -> pd.Series:
+        """Calculates how many trades are part of each return contribution."""   
+        co_events = pd.Series(0, index = self.data.index, name = 'num_co_events')
+        for start_date, end_date in self.data[ColNames.END_DT].iteritems():
+            co_events.loc[start_date:end_date] +=1
+        return co_events
+            
+
 @dataclass
-class FixedTimeFrame(ResearchFrame):
+class FixedTimeFrameGenerator(ResearchFrameGenerator):
     """
     Calculates forward returns using a fixed time horizon for a single asset.
     
@@ -164,15 +204,16 @@ class FixedTimeFrame(ResearchFrame):
         asset_name: The name of the asset.
         max_holding_time: A timedelta object representing how long we are willing to hold each trade.
     """
+    
     prices: pd.Series
     asset_name: str
     max_holding_time: pd.Timedelta
    
-    def _find_end_dates(self) -> FixedTimeFrame:
+    def _find_end_dates(self) -> FixedTimeFrameGenerator:
         self._add_vertical_barriers(ColNames.END_DT) 
         return self
     
-    def _add_vertical_barriers(self, col_name:str) -> FixedTimeFrame:
+    def _add_vertical_barriers(self, col_name:str) -> FixedTimeFrameGenerator:
         """
         Finds the timestamp of the next price bar at or immediately after a number of days holding_days for each index in df.
         This function creates a series that has all the timestamps of when the vertical barrier is reached.
@@ -182,7 +223,7 @@ class FixedTimeFrame(ResearchFrame):
 
    
 @dataclass
-class TrippleBarrierFrame(FixedTimeFrame):
+class TrippleBarrierFrameGenerator(FixedTimeFrameGenerator):
     """"
     Calculates forward returns using the tripple barrier method. A trade is closed in one of three ways.
     1) A stop loss level is triggered 2) a profit taking level is hit or 3) a maximum amount of time has expiered.
@@ -199,6 +240,7 @@ class TrippleBarrierFrame(FixedTimeFrame):
         volatility_lookback: A lookback window that is used to calculate rolling volatility for target setting.
         
     """
+    
     #prices: pd.Series
     #asset_name: str
     #max_holding_time: Optional[pd.Timedelta] = pd.Timedelta(days = 1, hours = 0, minutes = 0)
@@ -206,16 +248,15 @@ class TrippleBarrierFrame(FixedTimeFrame):
     eval_datetimes: Optional[pd.DatetimeIndex] = None
     volatility_lookback: Optional[int] = 100
         
-    def _find_end_dates(self) -> TrippleBarrierFrame:
+    def _find_end_dates(self) -> TrippleBarrierFrameGenerator:
         self \
             ._add_vertical_barriers(ColNames.VERTICAL_BARRIER) \
             ._calculate_target_returns() \
             ._add_horizontal_barriers() \
             ._find_first_triggered_barrier()
-
         return self
 
-    def _calculate_target_returns(self) -> TrippleBarrierFrame:
+    def _calculate_target_returns(self) -> TrippleBarrierFrameGenerator:
         """
         Calculates the target levels for profit taking and stop loss at each timestamp.
         Uses volatility and a manual scaling factor (barrier_width).
@@ -228,7 +269,7 @@ class TrippleBarrierFrame(FixedTimeFrame):
         self.data = self.data.join(target_returns).dropna(subset = [ColNames.TARGET])
         return self
        
-    def _add_horizontal_barriers(self) -> TrippleBarrierFrame:       
+    def _add_horizontal_barriers(self) -> TrippleBarrierFrameGenerator:       
         """Finds first time between start date and end date that the stop loss and profit taking target is hit."""
         def _find_horizontal_barrier_dates(prices:pd.Series, start_date:dt.datetime, end_date:dt.datetime, target:float) -> Dict[str, float]:
             """"Used in _add_horizontal_barriers. """
@@ -250,7 +291,7 @@ class TrippleBarrierFrame(FixedTimeFrame):
         self.data = self.data.join(horizontal_barriers.set_index(ColNames.START_DT)).drop(ColNames.TARGET, axis = 1)
         return self
    
-    def _find_first_triggered_barrier(self) -> TrippleBarrierFrame:
+    def _find_first_triggered_barrier(self) -> TrippleBarrierFrameGenerator:
         """Finds which of the stop loss, profit taking or max holding periods that are triggered first."""
         barriers = [ColNames.STOP_LOSS, ColNames.PROFIT_TAKING, ColNames.VERTICAL_BARRIER]
         self.data[[ColNames.END_DT, ColNames.TRIGGER]] = (
@@ -264,7 +305,8 @@ class TrippleBarrierFrame(FixedTimeFrame):
    
 
 @dataclass
-class TrendScaningFrame(ResearchFrame):
+class TrendScaningFrameGenerator(ResearchFrameGenerator):
+    
     """ Calculates labels based on the trend from an OLS in a given forward window """
     
     prices: pd.Series
@@ -272,7 +314,7 @@ class TrendScaningFrame(ResearchFrame):
     time_periods: List[pd.Timdelta]
     eval_datetimes: Optional[pd.DatetimeIndex] = None
     
-    def _find_end_dates(self) -> TrendScaningFrame:
+    def _find_end_dates(self) -> TrendScaningFrameGenerator:
         data = pd.concat([self._calculate_trend(time_period) for time_period in self.time_periods])
         data['abs_val'] = data[ColNames.TVAL].abs()
         
@@ -299,48 +341,40 @@ class TrendScaningFrame(ResearchFrame):
         ])
         return trend.set_index(ColNames.START_DT)
 
-    def _add_labels(self) -> TrendScaningFrame:
+    def _add_labels(self) -> TrendScaningFrameGenerator:
         self.data[ColNames.LABEL] = np.sign(self.data[ColNames.TVAL])
         return self
         
-    def _add_sample_weights(self, time_decay: float = 1.) -> TrendScaningFrame:
+    def _add_sample_weights(self, time_decay: float = 1.) -> TrendScaningFrameGenerator:
         self.data = self.data.rename(columns = {ColNames.TVAL:ColNames.SAMPLE_WEIGHT})
         if time_decay < 1: 
             self.data[ColNames.SAMPLE_WEIGHT] *=  apply_time_decay(self.data[ColNames.SAMPLE_WEIGHT], last_weight = time_decay)
         return self 
-    
-@dataclass
-class MultiAssetFrame(ResearchFrame):
-    """ Creates a combined frame for multiple assets """
-    
-    research_frames: List[ResearchFrame]
-    
-    def __post_init__(self):
-        self.data = pd.concat([frame.data for frame in self.research_frames])
-        self.feature_columns = sorted(set(
-            [x for y in [frame.feature_columns for frame in self.research_frames if hasattr(frame, 'feature_columns')] for x in y]
-        ))
         
-    def _find_end_dates(self) -> MultiAssetFrame:
-        return self
- 
-    def __len__(self):
-        return len(self.research_frames)
-    
     
 def filtered_tripple_barrier_frame(
-        prices: pd.Series, asset_name: str, max_holding_time: pd.Timedelta, 
-        barrier_width: int, volatility_lookback: Optional[int] = 100
-    ) -> TrippleBarrierFrame:
+        prices: pd.Series, 
+        asset_name: str, 
+        max_holding_time: pd.Timedelta, 
+        barrier_width: int, 
+        features: pd.DataFrame, 
+        time_decay: float, 
+        volatility_lookback: Optional[int] = 100
+) -> ResearchFrame:
     
     eval_datetimes = volatility_based_cumsum_filter(prices, volatility_lookback)
-    return TrippleBarrierFrame(prices, asset_name, max_holding_time, barrier_width, eval_datetimes,volatility_lookback)
-
+    generator = TrippleBarrierFrameGenerator(prices, asset_name, max_holding_time, barrier_width, eval_datetimes,volatility_lookback)
+    return generator.create_frame(features, time_decay)
 
 def filtered_trend_scaning_frame(
-        prices: pd.Series, asset_name: str, time_periods:List[pd.Timdelta], 
+        prices: pd.Series, 
+        asset_name: str, 
+        time_periods: List[pd.Timdelta], 
+        features: pd.DataFrame, 
+        time_decay: float, 
         volatility_lookback: Optional[int] = 100
-    ) -> TrendScaningFrame:
+) -> ResearchFrame:
     
     eval_datetimes = volatility_based_cumsum_filter(prices, volatility_lookback)
-    return TrendScaningFrame(prices, asset_name, time_periods, eval_datetimes)
+    generator = TrendScaningFrameGenerator(prices, asset_name, time_periods, eval_datetimes)
+    return generator.create_frame(features, time_decay)
