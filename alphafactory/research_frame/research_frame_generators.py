@@ -1,96 +1,16 @@
 from __future__ import annotations
 from .utils import (
     get_daily_volatility, calculate_return, find_forward_dates, ols_reg,
-    volatility_based_cumsum_filter, apply_time_decay, return_ser
+    volatility_based_cumsum_filter, apply_time_decay
 )
-from typing import Optional, Dict, List, Union, Tuple
+from .research_frame import ResearchFrame, ColNames
+from typing import Optional, Dict, List, Union
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import datetime as dt 
 import pandas as pd
 import numpy as np
-import itertools
 
-class ColNames:
-    START_DT = 'date'
-    END_DT = 'end_date'
-    RETURN = 'return'
-    SAMPLE_WEIGHT = 'sample_weight'
-    LABEL = 'label'   
-    PROFIT_TAKING = 'profit_taking'
-    STOP_LOSS = 'stop_loss'
-    VERTICAL_BARRIER = 'vertical_barrier'
-    TARGET = 'target'
-    TRIGGER = 'trigger'
-    TVAL = 'tval'
-    ASSETS = 'asset'
-  
-    
-@dataclass
-class ResearchFrame:
-    
-    """ """
-    
-    data: pd.DataFrame
-    feature_columns: List[str] = None
-    
-    def __post_init__(self):
-        if self.feature_columns is None: self.feature_columns = [] 
-        
-    def cross_sectional_grouping(self, freq: str = None) -> Tuple[dt.datetime, pd.Series, pd.Series]:
-        """G roups the data by time period and feature across all assets for cross sectional study. """
-        period_group = self.data.index if freq is None else pd.Grouper(freq = freq, origin = 'start')
-        group = itertools.product(self.feature_columns, self.data.groupby(period_group))
-        for feature, (period, df) in group:
-            yield period, df[feature], df[ColNames.RETURN]
-
-    def longitudinal_grouping(self) -> Tuple[str, pd.Series, pd.Series]:
-        """ Groups the data by asset and feature across time for longitudinal study. """
-        group = itertools.product(self.feature_columns, self.data.groupby(self.assets))
-        for feature, (asset, df) in group:
-            yield asset, df[feature], df[ColNames.RETURN]
-
-    @property
-    def forward_returns(self) ->  Union[pd.Series, None]:
-        return return_ser(self.data, ColNames.RETURN)
-    
-    @property
-    def end_dates(self) ->  Union[pd.Series, None]:
-        return return_ser(self.data, ColNames.END_DT)
-    
-    @property
-    def sample_weights(self) -> Union[pd.Series, None]:
-        return return_ser(self.data, ColNames.SAMPLE_WEIGHT)
-    
-    @property
-    def labels(self) -> Union[pd.Series, None]:
-        return return_ser(self.data, ColNames.LABEL)
-    
-    @property
-    def features(self) -> Union[pd.Series, None]:
-        if self.feature_columns:
-            return self.data[self.feature_columns]
-    
-    @property
-    def assets(self) -> Union[pd.Series, None]:
-        return return_ser(self.data, ColNames.ASSETS)
-    
-    @property
-    def nr_assets(self) -> int:
-        return self.assets.nunique()
-    
-    @property
-    def shape(self):
-        return self.data.shape
-    
-    def __repr___(self):
-        return self.head().to_markdown()
-    
-    def __add__(self, research_frame) -> ResearchFrame:
-        return ResearchFrame(
-            data = pd.concat([self.data, research_frame.data]).drop_duplicates(),
-            feature_columns = sorted(set(self.feature_columns + research_frame.feature_columns))
-        )   
     
 class ResearchFrameGenerator(ABC):
     
