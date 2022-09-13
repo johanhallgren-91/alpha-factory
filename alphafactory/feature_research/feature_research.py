@@ -57,7 +57,7 @@ class FeatureResearch:
             'sample_weight': self.sample_weight
         }
     
-    def decompose_features(self, threshold: float = .95):
+    def decompose_features(self, threshold: float = .95) -> pd.DataFrame:
         self.X, self.orig_X  = feature_decomposition(self.X, threshold), self.X
         return self.X
 
@@ -72,7 +72,7 @@ class FeatureResearch:
         scores = [fit_and_score_p(train_idx = train, test_idx = test) for train, test in self.cv_split()]
         return pd.Series({'mean': np.mean(scores), 'std': np.std(scores)*len(scores)**-.5}, name = 'cv_score')
         
-    def feature_importance_mdi(self):
+    def feature_importance_mdi(self) -> FeatureImportance:
         fit = self.clf.fit(**self.clf_kwargs())
         return FeatureImportance(
             get_feature_importance(fit, self.X.columns),
@@ -80,7 +80,7 @@ class FeatureResearch:
             self.purged_cv_score()
         )
         
-    def feature_importance_sfi(self) -> pd.DataFrame:
+    def feature_importance_sfi(self) -> FeatureImportance:
         """
         Single feature importance (SFI) is a cross-section predictive-importance (out-of-sample) method.
         It computes the OOS performance score of each feature in isolation.
@@ -91,7 +91,7 @@ class FeatureResearch:
                 orient = 'index')
         )
     
-    def feature_importance_mda(self) -> tuple:
+    def feature_importance_mda(self) -> FeatureImportance:
         """
         Fits a classifier, derives its performance OOS according to some performance
         score (accuracy, negative log-loss, etc.); third, it permutates each column of the
@@ -145,7 +145,7 @@ class FeatureResearch:
             return {'group': group, 'feature': feature.name, 'corr': corr, 'p-value': pval}
         return pd.DataFrame([_corr_dict(*args) for args in group])
 
-    def check_stationarity(self): 
+    def check_stationarity(self) -> pd.DataFrame: 
         return pd.DataFrame([{
             'feature': feature.name, 'group': group, 'is_stationary': is_stationary(feature)}
              for group, feature, _ in self.research_frame.longitudinal_grouping()
