@@ -107,6 +107,10 @@ class ResearchFrame:
         return return_ser(self.data, ColNames.LABEL)
     
     @property
+    def label_distribution(self):
+        return self.labels.value_counts(normalize = True).mul(100).round(1).astype(str).add('%')
+
+    @property
     def features(self) -> Union[pd.Series, None]:
         if len(self.feature_columns) > 0:
             return self.data[self.feature_columns]
@@ -133,3 +137,8 @@ class ResearchFrame:
         )   
   
     
+def multi_asset_frame(research_frames: List[ResearchFrame]) -> ResearchFrame:
+    multi_asset_frame = research_frames[0]
+    for frame in research_frames[1:]:
+        multi_asset_frame += frame
+    return multi_asset_frame

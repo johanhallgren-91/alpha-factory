@@ -16,13 +16,13 @@ def score_clf(
         fit: BaseEstimator, 
         X_test:pd.DataFrame, 
         y_test:pd.Series,
-        sample_weights:np.array, 
+        sample_weight:np.array, 
         scoring: str
 ) -> float:
     """ Returns the scores of an classifier """
     if scoring == 'neg_log_loss':
-        return -log_loss(y_test, fit.predict_proba(X_test), sample_weight = sample_weights, labels = fit.classes_)
-    return accuracy_score(y_test, fit.predict(X_test), sample_weight = sample_weights)
+        return -log_loss(y_test, fit.predict_proba(X_test), sample_weight = sample_weight, labels = fit.classes_)
+    return accuracy_score(y_test, fit.predict(X_test), sample_weight = sample_weight)
 
 
 def fit_and_score(
@@ -45,7 +45,7 @@ def fit_and_score(
         fit = fit, 
         X_test = X.loc[test_idx], 
         y_test = y.loc[test_idx],
-        sample_weights = sample_weight.loc[test_idx].values,
+        sample_weight = sample_weight.loc[test_idx].values,
         scoring = scoring
     )
     return score if not return_clf else (score, fit) 

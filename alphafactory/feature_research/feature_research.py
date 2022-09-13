@@ -7,6 +7,15 @@ from functools import partial
 from scipy import stats
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
+
+
+@dataclass
+class FeatureImportance:
+    feature_importance: pd.DataFrame
+    out_of_sample_score: float = None
+    out_of_bag_score: float = None
+
 
 @dataclass
 class FeatureResearch:
@@ -49,12 +58,11 @@ class FeatureResearch:
         }
     
     def decompose_features(self, threshold: float = .95):
-        self.orig_X = self.X
-        self.X = feature_decomposition(self.X, threshold)
+        self.X, self.orig_X  = feature_decomposition(self.X, threshold), self.X
         return self.X
 
     def get_original_features(self) -> pd.DataFrame:
-        if hasattr(self, self.orig_X):
+        if hasattr(self, 'orig_X'):
             self.X = self.orig_X
         return self.X
     
@@ -66,24 +74,23 @@ class FeatureResearch:
         
     def feature_importance_mdi(self):
         fit = self.clf.fit(**self.clf_kwargs())
-        mdi = {
-            'feature_importance': get_feature_importance(fit, self.X.columns),
-            'out_of_bag_score': fit.oob_score_, 
-            'out_of_sample_score': self.purged_cv_score()
-        }
-        return mdi
-       
+        return FeatureImportance(
+            get_feature_importance(fit, self.X.columns),
+            fit.oob_score_,  
+            self.purged_cv_score()
+        )
+        
     def feature_importance_sfi(self) -> pd.DataFrame:
         """
         Single feature importance (SFI) is a cross-section predictive-importance (out-of-sample) method.
         It computes the OOS performance score of each feature in isolation.
         """
-        sfi =  pd.DataFrame.from_dict(
-            {col: self.purged_cv_score([col]) for col in self.X.columns}, 
-            orient = 'index'
+        return FeatureImportance(
+            pd.DataFrame.from_dict(
+                {col: self.purged_cv_score([col]) for col in tqdm(self.X.columns)}, 
+                orient = 'index')
         )
-        return sfi
-
+    
     def feature_importance_mda(self) -> tuple:
         """
         Fits a classifier, derives its performance OOS according to some performance
@@ -95,7 +102,7 @@ class FeatureResearch:
         """
         fit_and_score_p = partial(self.fit_and_score, **self.clf_kwargs(), return_clf = True)
         score, score_col = pd.Series(), pd.DataFrame(columns = self.X.columns)
-        for i, (train, test) in enumerate(self.cv_split()):
+        for i, (train, test) in tqdm(enumerate(self.cv_split()), total=self.n_splits):
             s, fit = fit_and_score_p(train_idx = train, test_idx = test)
             score.loc[i] = s
            
@@ -106,7 +113,7 @@ class FeatureResearch:
                     fit = fit,
                     X_test = X_test_,
                     y_test = self.y.loc[test],
-                    sample_weights = self.sample_weight.loc[test].values,
+                    sample_weight = self.sample_weight.loc[test].values,
                     scoring = self.scoring
                 )
             
@@ -122,23 +129,22 @@ class FeatureResearch:
             'std': feature_importance.std() * len(feature_importance)**-.5
             }, axis = 1
         )
-        mda= {
-            'feature_importance':feature_importance,
-            'out_of_sample_score': score.mean()
-        }
-        return mda
+        return FeatureImportance(feature_importance, score.mean())
 
-    def spearman_corr(self, longitudinal = True, freq = None) -> pd.DataFrame:
-        def corr_dict(group, feature, returns) -> Dict[str, any]:
+    def longitudinal_spearman_corr(self) -> pd.DataFrame:
+        """" Calculates the spearman correlation between each asset, feature and forwards returns."""
+        return self._spearman_corr(self.research_frame.longitudinal_grouping())
+    
+    def cross_sectional_spearman_corr(self, freq: str = None) -> pd.DataFrame:
+        """" Calculcates the cross-sectional spearman correlation for each asset across all assets during the given period."""
+        return self._spearman_corr(self.research_frame.cross_sectional_grouping(freq))
+    
+    def _spearman_corr(self, group) -> pd.DataFrame:
+        def _corr_dict(group, feature, returns) -> Dict[str, any]:
             corr, pval =  stats.spearmanr(feature, returns)
             return {'group': group, 'feature': feature.name, 'corr': corr, 'p-value': pval}
-        
-        grouping = (self.research_frame.longitudinal_grouping() if longitudinal 
-               else self.research_frame.cross_sectional_grouping(freq = freq)
-        )
-        spearman_corr = pd.DataFrame([corr_dict(*args) for args in grouping])
-        return spearman_corr
-       
+        return pd.DataFrame([_corr_dict(*args) for args in group])
+
     def check_stationarity(self): 
         return pd.DataFrame([{
             'feature': feature.name, 'group': group, 'is_stationary': is_stationary(feature)}

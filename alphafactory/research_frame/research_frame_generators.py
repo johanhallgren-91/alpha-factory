@@ -30,7 +30,7 @@ class ResearchFrameGenerator(ABC):
                 features: Union[pd.DataFrame, None] = None, 
                 time_decay: float = .75, 
                 dropna: bool = True, 
-                drop_col_tresh: float = .95
+                drop_col_tresh: float = .05
     ) -> ResearchFrame:
             """"
             The steps for setting up the frame. If no features are supplied it just calculates forward returns.
@@ -47,7 +47,7 @@ class ResearchFrameGenerator(ABC):
             if features is not None:
                 if isinstance(features, pd.Series): features = features.to_frame()
                 self._add_features(features, dropna = dropna, drop_col_tresh = drop_col_tresh) 
-                columns = self.data.columns.intersection(features.columns)           
+                columns = self.data.columns.intersection(features.columns)  
             self._add_sample_weights(time_decay) 
               
             return ResearchFrame(self.data, columns)
@@ -68,7 +68,7 @@ class ResearchFrameGenerator(ABC):
         self.data[ColNames.ASSETS] = self.asset_name
         return self
             
-    def _add_features(self, features: pd.DataFrame, dropna: bool = True, drop_col_tresh = .95) -> ResearchFrameGenerator:
+    def _add_features(self, features: pd.DataFrame, dropna: bool, drop_col_tresh: float) -> ResearchFrameGenerator:
         """
         Adds features to the returns. 
         Note that features should be resampled with the same frequenzy as prices and have NaNs filled in. 
