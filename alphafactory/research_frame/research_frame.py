@@ -127,7 +127,6 @@ class ResearchFrame:
             feature_columns = sorted(set(self.feature_columns + research_frame.feature_columns))
         )   
   
-    
 def create_research_frame(
         asset_name: str,
         label_generator: LabelGenerator, 
@@ -144,9 +143,9 @@ def create_research_frame(
         .pipe(lambda df: df[df.isnull().mean().loc[lambda x: x < max_pct_na].index])
         .dropna()
         .pipe(label_generator.calculate_sample_weights, time_decay)
-        .assign(**{ColNames.ASSETS: asset_name})
+        .assign(**{ColNames.ASSETS: asset_name.upper()})
     )
-    return ResearchFrame(frame, frame.columns.intersection(features.columns))
+    return ResearchFrame(frame, frame.columns.intersection(features.columns).to_list())
 
 def create_filtered_tripple_barrier_frame(
         prices: pd.Series, 
