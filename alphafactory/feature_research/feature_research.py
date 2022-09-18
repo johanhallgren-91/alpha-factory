@@ -145,6 +145,28 @@ class FeatureResearch:
             return {'group': group, 'feature': feature.name, 'corr': corr, 'p-value': pval}
         return pd.DataFrame([_corr_dict(*args) for args in group])
 
+    def longitudinal_quantile_returns(self) -> pd.DataFrame:
+        return self._mean_quantile_returns(self.research_frame.longitudinal_grouping())
+    
+    def cross_sectional_quantile_returns(self, freq: str = None) -> pd.DataFrame:
+        return self._mean_quantile_returns(self.research_frame.cross_sectional_grouping(freq))
+    
+    def _mean_quantile_returns(self, group, quantiles: int = 5) -> pd.DataFrame:
+        quantile_func = lambda group, feature, ret: (
+            pd.qcut(feature, quantiles, labels = False)
+                .add(1)
+                .to_frame('quantile')
+                .assign(
+                    group = group, 
+                    feature = feature.name)
+                .join(ret)
+        )
+        quantiles = pd.concat(
+            quantile_func(asset, feature, ret) 
+            for asset, feature, ret in group
+        )
+        return quantiles.groupby(['group', 'feature', 'quantile']).mean()  
+        
     def check_stationarity(self) -> pd.DataFrame: 
         return pd.DataFrame([{
             'feature': feature.name, 'group': group, 'is_stationary': is_stationary(feature)}

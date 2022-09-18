@@ -1,28 +1,19 @@
 from __future__ import annotations
+from .labeling_strategies import (
+    ColNames, 
+    LabelGenerator, 
+    filtered_tripple_barrier_labels, 
+    filtered_trend_scaning_labels
+)
+from .utils import return_ser
 from typing import List, Union, Tuple, Dict
 from dataclasses import dataclass
-from .utils import return_ser
 import datetime as dt 
 import pandas as pd
 import itertools
 import numpy as np
 
 
-class ColNames:
-    START_DT = 'date'
-    END_DT = 'end_date'
-    RETURN = 'return'
-    SAMPLE_WEIGHT = 'sample_weight'
-    LABEL = 'label'   
-    PROFIT_TAKING = 'profit_taking'
-    STOP_LOSS = 'stop_loss'
-    VERTICAL_BARRIER = 'vertical_barrier'
-    TARGET = 'target'
-    TRIGGER = 'trigger'
-    TVAL = 'tval'
-    ASSETS = 'asset'
-  
-    
 @dataclass
 class ResearchFrame:
     
@@ -137,6 +128,75 @@ class ResearchFrame:
         )   
   
     
+def create_research_frame(
+        asset_name: str,
+        label_generator: LabelGenerator, 
+        features: pd.DataFrame, 
+        time_decay: float,
+        max_pct_na: float
+    ) -> ResearchFrame:
+    """
+    Takes a label generator and features a dataframe with features to create a research frame. 
+    """
+    frame = (
+        label_generator.create_labels()
+        .merge(features, how = 'left', left_index = True, right_index = True, validate = 'one_to_one')
+        .pipe(lambda df: df[df.isnull().mean().loc[lambda x: x < max_pct_na].index])
+        .dropna()
+        .pipe(label_generator.calculate_sample_weights, time_decay)
+        .assign(**{ColNames.ASSETS: asset_name})
+    )
+    return ResearchFrame(frame, frame.columns.intersection(features.columns))
+
+def create_filtered_tripple_barrier_frame(
+        prices: pd.Series, 
+        max_holding_period: pd.Timedelta,
+        barrier_width: float, 
+        volatility_lookback: int,
+        asset_name: str,
+        features: pd.DataFrame, 
+        time_decay: float,
+        max_pct_na: float
+    ):  
+    """ Convinence function to create a filtered tripple barrier research frame"""
+    label_generator = filtered_tripple_barrier_labels(
+        prices = prices, 
+        max_holding_period = max_holding_period, 
+        barrier_width = barrier_width, 
+        volatility_lookback = volatility_lookback
+    )
+    frame = create_research_frame(
+        asset_name = asset_name, 
+        label_generator = label_generator, 
+        features = features, 
+        time_decay = time_decay, 
+        max_pct_na = max_pct_na
+    )
+    return frame
+
+def create_filtered_trend_scaning_frame(
+        prices: pd.Series, 
+        holding_periods: List[pd.Timdelta],
+        volatility_lookback: int,
+        asset_name: str,
+        features: pd.DataFrame, 
+        time_decay: float,
+        max_pct_na: float
+    ):  
+    """ Convinence function to create a filtered tripple barrier research frame"""
+    label_generator = filtered_trend_scaning_labels(
+        prices = prices, 
+        holding_periods = holding_periods
+    )
+    frame = create_research_frame(
+        asset_name = asset_name, 
+        label_generator = label_generator, 
+        features = features, 
+        time_decay = time_decay, 
+        max_pct_na = max_pct_na
+    )
+    return frame
+
 def multi_asset_frame(research_frames: List[ResearchFrame]) -> ResearchFrame:
     multi_asset_frame = research_frames[0]
     for frame in research_frames[1:]:
