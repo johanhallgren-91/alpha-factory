@@ -1,1 +1,1 @@
-from .bar_resampling.bars import calculate_dollar_or_volume_barsfrom .research_frame.research_frame import (    create_filtered_tripple_barrier_frame,     create_filtered_trend_scaning_frame)from .feature_research.feature_research import FeatureResearch
+from .bar_resampling.bars import calculate_dollar_or_volume_bars
