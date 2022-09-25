@@ -6,9 +6,9 @@ from .utils import (
 )
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Optional
 import pandas as pd
 import numpy as np
-from typing import Optional
 
     
 @dataclass 
@@ -23,6 +23,8 @@ class BaseLabels(ABC):
     ----------
     prices : pd.Sereis
         A series of prices indexed with datetime. 
+    eval_datetimes: Optional[pd.DatetimeIndex]
+        Alows to specify a subest of observations to evaluate. 
     """
     
     prices: pd.Series
@@ -43,7 +45,7 @@ class BaseLabels(ABC):
         if self.eval_datetimes is None:    
             self.eval_datetimes = self.prices.index 
             
-    def _calculate_forward_returns(self, apply_filter:bool = False) -> pd.DataFrame:
+    def _calculate_forward_returns(self, apply_filter: bool = False) -> pd.DataFrame:
         """Calculate the return based on the end date."""
         if apply_filter: 
             self._apply_filter()
@@ -53,14 +55,15 @@ class BaseLabels(ABC):
             start_price = self.prices.loc[forward_returns.index],
             end_price = self.prices.loc[pd.DatetimeIndex(forward_returns[ColNames.END_DT])].values
         ).replace([np.inf, -np.inf], np.nan).astype(float)
+        forward_returns.index.names = [ColNames.START_DT]
         return forward_returns
     
     def create_labels(self, apply_filter: bool = False) -> pd.DataFrame:
         labels = self._calculate_forward_returns(apply_filter)
-        labels[ColNames.LABEL] = np.sign(labels[ColNames.RETURN]).astype(int)
+        labels[ColNames.LABEL] = np.sign(labels[ColNames.RETURN]).astype('int8')
         return labels
     
-    def calculate_sample_weights(self, labels: pd.DataFrame, time_decay: float = .75) -> pd.DataFrame:
+    def calculate_sample_weights(self, labels: pd.DataFrame, time_decay: float = 1.) -> pd.DataFrame:
         """
         Calculates and adds sample weights base on uniqness and returns of each observation. 
         If time decay is less than 1 more recent older observations sample weight 

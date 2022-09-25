@@ -3,10 +3,10 @@ from .utils import (
     get_daily_volatility, 
     get_mean_returns, 
     calculate_return, 
+    mp_apply,
     ColNames
 )
 from dataclasses import dataclass
-from typing import Optional
 import pandas as pd
 
 
@@ -33,16 +33,17 @@ class TrippleBarrierLabels(FixedTimeLabels):
         
     """
     
-    barrier_width: Optional[float] = 1.
-    volatility_lookback: Optional[int] = 100
-        
+    barrier_width: float = 1.
+    volatility_lookback: int = 100
+    multiprocess: bool = False
+    
     def _find_end_dates(self) -> pd.DataFrame:
         target_returns = self._calculate_target_returns()
         vertical_barriers = self._find_vertical_barriers(ColNames.VERTICAL_BARRIER) 
         horizontal_barriers = self._find_horizontal_barriers(vertical_barriers, target_returns)
         return self._find_first_triggered_barrier(vertical_barriers, horizontal_barriers)
 
-    def _calculate_target_returns(self, include_mean:bool = False) -> pd.Series:
+    def _calculate_target_returns(self, include_mean: bool = False) -> pd.Series:
         """
         Calculates the target levels for profit taking and stop loss at each timestamp.
         Uses volatility and a manual scaling factor (barrier_width).
@@ -83,18 +84,17 @@ class TrippleBarrierLabels(FixedTimeLabels):
                 ColNames.STOP_LOSS: returns[returns < row[ColNames.TARGET]*-1].index.min(),
                 ColNames.PROFIT_TAKING: returns[returns > row[ColNames.TARGET]].index.min()
             }
-      
+            
         data = pd.concat([vertical_barriers, target_returns], axis = 1).dropna()
-        return data.apply(_find_horizontal_barrier_dates, prices = self.prices, axis = 1, result_type = 'expand')
+        return mp_apply(data, self.multiprocess, _find_horizontal_barrier_dates, prices = self.prices, axis = 1, result_type = 'expand')
 
                           
-    def _find_first_triggered_barrier(self, vertical_barriers: pd.DataFrame, horizontal_barrier: pd.DataFrame) -> pd.Series:
+    def _find_first_triggered_barrier(self, vertical_barriers: pd.DataFrame, horizontal_barrier: pd.DataFrame) -> pd.DataFrame:
         """Finds which of the stop loss, profit taking or max holding periods that are triggered first."""
         barriers = (
             pd.concat([vertical_barriers, horizontal_barrier], axis = 1)
                 .dropna(how='all')
-                .agg(['min','idxmin'], axis=1)
-                .rename(columns = {'min': ColNames.END_DT, 'idxmin': ColNames.TRIGGER})
+                .parallel_apply(lambda x: x.min(), axis = 1)
+                .to_frame(ColNames.END_DT)
         )
-        self.barrier_distribution = barriers[ColNames.TRIGGER].value_counts()
-        return barriers[[ColNames.END_DT]]
+        return barriers

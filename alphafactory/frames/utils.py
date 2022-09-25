@@ -6,13 +6,13 @@ from sklearn.base import BaseEstimator
 from typing import Union, Tuple
 import pandas as pd
 import numpy as np
-
+from ..labeling.utils import mp_apply
 
 def score_clf(
         fit: BaseEstimator, 
-        X_test:pd.DataFrame, 
-        y_test:pd.Series,
-        sample_weight:np.array, 
+        X_test: pd.DataFrame, 
+        y_test: pd.Series,
+        sample_weight: np.array, 
         scoring: str
 ) -> float:
     """ Returns the scores of an classifier """
@@ -30,7 +30,7 @@ def fit_and_score(
         test_idx: pd.DatetimeIndex, 
         X: pd.DataFrame, 
         y: pd.Series, 
-        sample_weight:pd.Series, 
+        sample_weight: pd.Series, 
         scoring: str,
         return_clf: bool = False
 ) -> Union[float, Tuple[float, BaseEstimator]]:
@@ -65,7 +65,7 @@ def feature_decomposition(features: pd.DataFrame, threshold: float = .95) -> pd.
     return orth_features
 
 
-def get_feature_importance(fit: BaseEstimator, feature_names:list) -> pd.Series:
+def get_feature_importance(fit: BaseEstimator, feature_names: list) -> pd.Series:
     """
     Gets the feature importance from a fited tree classeifier.    
     """
@@ -81,3 +81,37 @@ def get_feature_importance(fit: BaseEstimator, feature_names:list) -> pd.Series:
     )
     feature_importance /= feature_importance['mean'].sum()
     return feature_importance
+
+
+def return_ser(df: pd.DataFrame, col_name: str):
+    if col_name in df.index.names: 
+        return df.index.get_level_values(col_name)
+    return df[col_name] if col_name in df.columns else None
+
+
+def group_by_per_column(
+        df: pd.DataFrame, grouper: Union[pd.Series, str], 
+        func: callable, multiprocess: bool = False) -> pd.DataFrame:
+    """
+    Applies a function of to each group and function in the dataframe. 
+    Allows for multiprocessing calculations. 
+    """
+    grouper = df.groupby(grouper)
+    mp_grouper = len(grouper) > len(df.columns)
+    return mp_apply(grouper, mp_grouper * multiprocess,
+        lambda group: mp_apply(group, (not mp_grouper) * multiprocess,
+            lambda column: func(column, group)
+        )
+    )
+
+
+def down_sample_df(df: pd.DataFrame, freq: str) -> pd.DataFrame:
+    index_name = df.index.names[0]
+    idx = (
+        df
+            .reset_index()
+            .groupby(df.index.to_period(freq))
+            [index_name]
+            .idxmax()
+    )
+    return df.iloc[idx]

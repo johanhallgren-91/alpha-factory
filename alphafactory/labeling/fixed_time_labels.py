@@ -20,7 +20,7 @@ class FixedTimeLabels(BaseLabels):
     def _find_end_dates(self) -> pd.DataFrame:
         return self._find_vertical_barriers(ColNames.END_DT) 
     
-    def _find_vertical_barriers(self, col_name:str) -> pd.DataFrame:
+    def _find_vertical_barriers(self, col_name: str) -> pd.DataFrame:
         """
         Finds the timestamp of the next price bar at or immediately after a number of days holding_days for each index in df.
         This function creates a series that has all the timestamps of when the vertical barrier is reached.

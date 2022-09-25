@@ -9,6 +9,7 @@ from .utils import (
 from sklearn.base import BaseEstimator
 from dataclasses import dataclass
 from functools import partial
+from typing import Optional
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -17,18 +18,22 @@ import numpy as np
 @dataclass
 class FeatureImportance:
     feature_importance: pd.DataFrame
-    out_of_sample_score: float = None
-    out_of_bag_score: float = None
+    out_of_sample_score: Optional[float] = None
+    out_of_bag_score: Optional[float] = None
     
     
 @dataclass 
 class ResearchFrame(StatsFrame):
     
-    clf: BaseEstimator = None 
-    n_spits: int = None
-    embargo_time: pd.Timdelta = None
-    scoring: str = None
-   
+    clf: Optional[BaseEstimator] = None 
+    n_spits: Optional[int] = None
+    embargo_time: Optional[pd.Timdelta] = None
+    scoring: Optional[str] = None
+    
+    def __post_init__(self) -> None:
+        self.data = self.data.sort_index(level = self.dates.name) 
+        self.has_config = False
+        
     def set_config(self, clf: BaseEstimator, n_splits: int, embargo_time: pd.Timedelta, scoring: str) -> None:
         self.clf = clf
         self.n_splits = n_splits
@@ -39,7 +44,12 @@ class ResearchFrame(StatsFrame):
             clf = self.clf, 
             scoring = self.scoring
         )
- 
+        self.has_config = True
+        
+    def check_config(self):
+        if not self.has_config:
+            raise AttributeError('You need to set config before running this method.')  
+            
     def decompose_features(self, threshold: float = .95) -> pd.DataFrame:
         self.features, self.orig_features  = feature_decomposition(self.features, threshold), self.features
         return self.features
@@ -49,7 +59,7 @@ class ResearchFrame(StatsFrame):
             self.features = self.orig_features
         return self.features
     
-    def clf_kwargs(self, classification: bool = True, feature_subset: list[str] = None) -> dict[str, pd.DataFrame]:
+    def clf_kwargs(self, feature_subset: Optional[list[str]] = None, classification: bool = True) -> dict[str, pd.DataFrame]:
         if feature_subset is None: feature_subset = self.features.columns
         return {
             'X': self.features[feature_subset], 
@@ -72,8 +82,10 @@ class ResearchFrame(StatsFrame):
           drop_idx = starts_within.union(end_within).union(envelops)
           return train.drop(drop_idx)
       
-       end_dates = self.end_dates
-       end_dates.sort_index(inplace = True)
+       if not all(self.data.index == self.data.sort_index(level = self.dates.name).index):
+           raise IndexError('Index need to be sorted by datetime')
+       
+       end_dates = self.end_dates.reset_index(self.assets.name, drop = True)
        indices = np.arange(len(end_dates))  
        
        uniq_idx = np.unique(end_dates.index)
@@ -92,13 +104,18 @@ class ResearchFrame(StatsFrame):
            train = _purge_train_set(train, test, self.embargo_time)
            yield train.index, test.index
            
-    def purged_cv_score(self, feature_subset: list[str] = None) -> pd.Series:
+    def purged_cv_score(self, feature_subset: Optional[list[str]] = None) -> pd.Series:
         """ Purges the train set and crossvalidates a classifier. """    
-        fit_and_score_p = partial(self.fit_and_score, **self.clf_kwargs(feature_subset))
-        scores = [fit_and_score_p(train_idx = train, test_idx = test) for train, test in self.cv_split()]
-        return pd.Series({'mean': np.mean(scores), 'std': np.std(scores)*len(scores)**-.5}, name = 'cv_score')
+        self.check_config()
+        Xysw = self.clf_kwargs(feature_subset=feature_subset)
+        scores = [
+            self.fit_and_score(train_idx = train, test_idx = test, **Xysw) 
+            for train, test in self.purged_cv_split()
+        ]
+        return pd.Series({'mean': np.mean(scores), 'std': np.std(scores) * len(scores)**-.5}, name = 'cv_score')
         
     def feature_importance_mdi(self) -> FeatureImportance:
+        self.check_config()
         fit = self.clf.fit(**self.clf_kwargs())
         return FeatureImportance(
             get_feature_importance(fit, self.features.columns),
@@ -111,6 +128,7 @@ class ResearchFrame(StatsFrame):
         Single feature importance (SFI) is a cross-section predictive-importance (out-of-sample) method.
         It computes the OOS performance score of each feature in isolation.
         """
+        self.check_config()
         return FeatureImportance(
             pd.DataFrame.from_dict(
                 {col: self.purged_cv_score([col]) for col in tqdm(self.features.columns)}, 
@@ -126,20 +144,21 @@ class ResearchFrame(StatsFrame):
         its column's permutation.
 
         """
-        fit_and_score_p = partial(self.fit_and_score, **self.clf_kwargs(), return_clf = True)
+        self.check_config()
+        Xysw = self.clf_kwargs()
         score, score_col = pd.Series(), pd.DataFrame(columns = self.features.columns)
-        for i, (train, test) in tqdm(enumerate(self.cv_split()), total=self.n_splits):
-            s, fit = fit_and_score_p(train_idx = train, test_idx = test)
+        for i, (train, test) in tqdm(enumerate(self.purged_cv_split()), total=self.n_splits):
+            s, fit = self.fit_and_score(train_idx = train, test_idx = test, **Xysw, return_clf = True)
             score.loc[i] = s
            
             for col in self.features.columns:
-                X_test_ = self.features.loc[test].copy(deep = True)
+                X_test_ = Xysw['X'].loc[test].copy(deep = True)
                 np.random.shuffle(X_test_[col].values)
                 score_col.loc[i, col] = score_clf(
                     fit = fit,
                     X_test = X_test_,
-                    y_test = self.y.loc[test],
-                    sample_weight = self.sample_weight.loc[test].values,
+                    y_test = Xysw['y'].loc[test],
+                    sample_weight = Xysw['sample_weight'].loc[test].values,
                     scoring = self.scoring
                 )
             

@@ -1,5 +1,5 @@
-from typing import Optional
-import statsmodels.api as sm
+from pandarallel import pandarallel
+from numba import njit
 import pandas as pd
 import numpy as np
 
@@ -20,7 +20,7 @@ class ColNames:
     ASSETS = 'asset'
     
     
-def get_1d_return(prices:pd.Series) -> pd.Series:
+def get_1d_return(prices: pd.Series) -> pd.Series:
     """Computes the daily return at intraday estimation points."""
     idx = prices.index.searchsorted(prices.index - pd.Timedelta(days=1), side = 'right')
     idx = idx[idx > 0]
@@ -33,7 +33,7 @@ def get_1d_return(prices:pd.Series) -> pd.Series:
     return returns
 
 
-def get_daily_volatility(prices: pd.Series, lookback: Optional[int]=100) -> pd.Series:
+def get_daily_volatility(prices: pd.Series, lookback: int = 100) -> pd.Series:
     """
     Computes the daily volatility at intraday estimation points,
     applying a span of lookback days to an exponentially weighted moving standard deviation.
@@ -42,7 +42,7 @@ def get_daily_volatility(prices: pd.Series, lookback: Optional[int]=100) -> pd.S
     return get_1d_return(prices).ewm(span=lookback).std()
 
 
-def get_mean_returns(prices: pd.Series, lookback: Optional[int] = 100) -> pd.Series:
+def get_mean_returns(prices: pd.Series, lookback: int = 100) -> pd.Series:
     return get_1d_return(prices).ewm(span = lookback).mean()
 
 
@@ -57,33 +57,37 @@ def cumsum_filter(prices: pd.Series, threshold: float) -> pd.DatetimeIndex:
     market signals such as Bollinger Bands. 
     """
     
-    events = []
-    sum_pos = sum_neg = 0
+    @njit
+    def _cumsum_filter(values: np.array, threshold: float) -> list[int]:
+            
+        events = []
+        sum_pos = sum_neg = 0
+        
+        for idx in range(len(values)):
+            sum_pos = max(0, sum_pos + values[idx])
+            sum_neg = min(0, sum_neg + values[idx])
 
+            if sum_neg < -threshold:
+                sum_neg = 0
+                events.append(idx)
+
+            elif sum_pos > threshold:
+                sum_pos = 0
+                events.append(idx)
+                
+        return events
+    
     log_returns = (
         prices
             .apply(np.log) 
             .diff()
             .dropna()
     )
-
-    for dt, ret in log_returns[1:].iteritems():
-        sum_pos = max(0, sum_pos + ret)
-        sum_neg = min(0, sum_neg + ret)
-
-        if sum_neg < -threshold:
-            sum_neg = 0
-            events.append(dt)
-
-        elif sum_pos > threshold:
-            sum_pos = 0
-            events.append(dt)
-
-    event_dts = pd.DatetimeIndex(events)
-    return event_dts
+    events = _cumsum_filter(log_returns.values, threshold)
+    return log_returns.iloc[events].index
 
 
-def volatility_based_cumsum_filter(prices: pd.Series, volatility_lookback: Optional[int] = 100) -> pd.DatetimeIndex:
+def volatility_based_cumsum_filter(prices: pd.Series, volatility_lookback: int = 100) -> pd.DatetimeIndex:
     daily_volatility = get_daily_volatility(prices, lookback = volatility_lookback)
     eval_datetimes = cumsum_filter(
         prices = prices,
@@ -104,7 +108,7 @@ def find_forward_dates(date_index: pd.DatetimeIndex, timedelta: pd.Timedelta) ->
     )
 
 
-def calculate_sample_weights(returns: pd.Series, trade_dates:pd.Series, time_decay: Optional[float] = 1.) -> pd.Series:
+def calculate_sample_weights(returns: pd.Series, trade_dates:pd.Series, time_decay: float = 1.) -> pd.Series:
     """
     Highly overlapping outcomes would have disproportionate weights if considered equal to non-overlapping outcomes.
     At the same time, labels associated with large absolute returns should be given more importance than labels with negligible absolute returns.
@@ -129,11 +133,11 @@ def numb_concurrent_events(trade_dates: pd.Series) -> pd.Series:
     """Calculates how many trades are part of each return contribution."""   
     co_events = pd.Series(0, index = trade_dates.index, name = 'num_co_events')
     for start_date, end_date in trade_dates.iteritems():
-        co_events.loc[start_date:end_date] +=1
+        co_events.loc[start_date:end_date] += 1
     return co_events
 
 
-def apply_time_decay_to_sample_weights(weights: pd.Series, last_weight: Optional[float] = .5, exponent: Optional[int] = 1) -> pd.Series:
+def apply_time_decay_to_sample_weights(weights: pd.Series, last_weight: float, exponent: int = 1) -> pd.Series:
     """
     Markets are adaptive systems (Lo [2017]). As markets evolve, older examples are less relevant than the newer ones. 
     Consequently, we would typically like sample weights to decay as new observations arrive.
@@ -156,9 +160,17 @@ def apply_time_decay_to_sample_weights(weights: pd.Series, last_weight: Optional
 
 
 def ols_reg(arr: np.array) -> float:
+    #Imports statsmodels here to allow apply_paralel with pandarallel
+    import statsmodels.api as sm
     x = sm.add_constant(np.arange(arr.shape[0]))
     return sm.OLS(arr, x).fit()
 
 
 def calculate_return(start_price:pd.Series, end_price:pd.Series) -> pd.Series:
     return end_price / start_price - 1  
+
+def mp_apply(df, multiprocess: bool, *args, **kwargs) -> pd.DataFrame:
+    if multiprocess: 
+        pandarallel.initialize(progress_bar=True)
+        return df.parallel_apply(*args, **kwargs)
+    return df.apply(*args, **kwargs)

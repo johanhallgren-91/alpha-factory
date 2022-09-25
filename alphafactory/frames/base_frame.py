@@ -2,7 +2,7 @@ from __future__ import annotations
 from ..labeling.utils import ColNames
 from .utils import return_ser
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, Optional
 import pandas as pd
 
 
@@ -12,7 +12,7 @@ class BaseFrame:
     """ Wraps a dataframe and adds domain specific attributes and methods. """
     
     data: pd.DataFrame
-    feature_columns: list[str] = None
+    feature_columns: Optional[list[str]] = None
     
     def __post_init__(self) -> None:
         if self.feature_columns is None: self.feature_columns = [] 
@@ -28,6 +28,10 @@ class BaseFrame:
         return return_ser(self.data, ColNames.END_DT)
     
     @property
+    def dates(self) ->  Union[pd.Series, None]:
+        return return_ser(self.data, ColNames.START_DT)
+        
+    @property
     def sample_weight(self) -> Union[pd.Series, None]:
         return return_ser(self.data, ColNames.SAMPLE_WEIGHT)
     
@@ -42,7 +46,7 @@ class BaseFrame:
     @property
     def features(self) -> Union[pd.Series, None]:
         if len(self.feature_columns) > 0:
-            return self.data[self.feature_columns]
+            return self.data[self.data.columns.intersection(self.feature_columns)]
     
     @property
     def assets(self) -> Union[pd.Series, None]:

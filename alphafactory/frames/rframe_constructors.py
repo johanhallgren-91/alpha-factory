@@ -1,7 +1,8 @@
-from ..labeling import TrippleBarrierLabels, TrendScaningLabels 
+from ..labeling.tripple_barrier_labels import TrippleBarrierLabels 
+from ..labeling.trend_scaning_labels import TrendScaningLabels
 from ..labeling.base_labels import BaseLabels
 from ..labeling.utils import ColNames
-from . import ResearchFrame
+from .research_frame import ResearchFrame
 import pandas as pd
 
 
@@ -23,6 +24,7 @@ def create_research_frame(
             .dropna()
             .pipe(labels.calculate_sample_weights, time_decay)
             .assign(**{ColNames.ASSETS: asset_name.upper()})
+            .set_index(ColNames.ASSETS, append = True)
     )
     return ResearchFrame(frame, frame.columns.intersection(features.columns).to_list())
 
@@ -36,6 +38,7 @@ def create_tripple_barrier_frame(
         max_holding_period: pd.Timedelta,
         barrier_width: float, 
         volatility_lookback: int,
+        multiprocess: bool,
         filter_labels: bool
     ) -> ResearchFrame:   
     """ Convinence function to create a filtered tripple barrier research frame"""
@@ -43,7 +46,8 @@ def create_tripple_barrier_frame(
         prices = prices, 
         max_holding_period = max_holding_period, 
         barrier_width = barrier_width, 
-        volatility_lookback = volatility_lookback
+        volatility_lookback = volatility_lookback, 
+        multiprocess=multiprocess
     )
     frame = create_research_frame(
         asset_name = asset_name, 
@@ -62,14 +66,16 @@ def create_trend_scaning_frame(
         features: pd.DataFrame, 
         time_decay: float,
         max_pct_na: float,
-        holding_periods: list[pd.Timdelta],
+        holding_periods: list[pd.Timedelta],
         volatility_lookback: int, 
+        multiprocess: bool, 
         filter_labels: bool
     ) -> ResearchFrame:  
     """ Convinence function to create a filtered tripple barrier research frame"""
     labels = TrendScaningLabels(
         prices = prices, 
-        holding_periods = holding_periods
+        holding_periods = holding_periods, 
+        multiprocess = multiprocess
     )
     frame = create_research_frame(
         asset_name = asset_name, 

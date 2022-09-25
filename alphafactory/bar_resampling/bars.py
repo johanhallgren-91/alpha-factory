@@ -1,5 +1,5 @@
 from . import utils
-from typing import List, Union
+from typing import Optional
 from numba import njit
 import pandas as pd
 import numpy as np
@@ -7,7 +7,7 @@ import numpy as np
 
 def calculate_dollar_or_volume_bars(
         timebars: pd.DataFrame, 
-        rolling_per: Union[None, int] = None, 
+        rolling_per: Optional[int] = None, 
         nr_bars_per_day: int = 50,
         dollarbar: bool = True, 
         start_idx: int = 0
@@ -75,7 +75,7 @@ def _calculate_bars(
         threshholds: np.array, 
         buy_volume: np.array, 
         dollarbar: bool = True
-    ) -> List[list]:
+    ) -> list[list]:
     """"
     Helper function for calculate_dollar_or_volume_bars. Wraps the looping part with numba to speed up the calcualtions. 
     """
